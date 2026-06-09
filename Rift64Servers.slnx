@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/RiftServe64/">
+    <Project Path="RiftServe64/riftserve64.csproj" />
+  </Folder>
+  <Project Path="RiftGate/RiftGate.csproj" />
+  <Project Path="riftserve64.sdk/riftserve64.sdk.csproj" />
+  <Project Path="RiftWriter/RiftWriter.csproj" />
+</Solution>

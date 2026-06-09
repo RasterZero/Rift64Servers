@@ -1,0 +1,5 @@
+# Rift Gate Registered Apps database
+# Format: dns/ip, port, name, description, useTls, validateCert
+"rift64.com", 64001, "Test Connection", "A 20-second connection and hardware diagnostics test.", 0, 0
+"rift64.com", 64002, "RiftWire IRC", "A multi-user PETSCII chat server and channel system.", 0, 0
+"rift64.com", 64003, "RiftWire IRC (Secure)", "A secure, TLS-encrypted connection to the RiftWire chat server.", 1, 0

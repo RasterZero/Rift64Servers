@@ -1,0 +1,9 @@
+{
+  "AdminUsername": "admin",
+  "AdminPassword": "changeme",
+  "MaxConnections": 8,
+  "EnableWaveAnimation": true,
+  "EnableSpriteAnimation": true,
+  "EnableTitleFader": true,
+  "WebPort": 8088
+}
