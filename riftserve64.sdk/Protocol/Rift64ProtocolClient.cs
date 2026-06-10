@@ -34,7 +34,6 @@ public sealed partial class Rift64ProtocolClient
     private const byte CommandAudio = (byte)'A';
     private const byte CommandTelemetry = (byte)'J';
     private const byte CommandDrawMetatile = (byte)'D';
-    private const byte CommandCustomRestore = (byte)'O';
     private const byte AckByte = (byte)'A';
     private const byte NakByte = (byte)'N';
     private static readonly TimeSpan CommandAckTimeout = TimeSpan.FromMilliseconds(1000);
@@ -961,36 +960,6 @@ public sealed partial class Rift64ProtocolClient
             bank[3 * 256 + id] = br;
         }
         return bank;
-    }
-
-    public Task StartCustomRestoreAsync(
-        byte frameCount,
-        byte jiffyDelay,
-        byte paletteMode,
-        CancellationToken cancellationToken = default)
-    {
-        var payload = new byte[6];
-
-        EncodeHexByte(frameCount, payload.AsSpan(0, 2));
-        EncodeHexByte(jiffyDelay, payload.AsSpan(2, 2));
-        EncodeHexByte(paletteMode, payload.AsSpan(4, 2));
-
-        return SendCommandAsync(CommandCustomRestore, payload, cancellationToken);
-    }
-
-    public async Task<bool?> StopCustomRestoreAsync(
-        TimeSpan timeout = default,
-        CancellationToken cancellationToken = default)
-    {
-        if (timeout == default)
-        {
-            timeout = TimeSpan.FromSeconds(2);
-        }
-
-        // Send a single dummy 'S' (stop) byte to unblock the C64 animation loop
-        var stopPayload = new[] { (byte)'S' };
-        await _connection.WriteAsync(stopPayload, cancellationToken).ConfigureAwait(false);
-        return await WaitForAckAsync(timeout, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<char?> ReadKeyAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
