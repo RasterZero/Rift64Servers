@@ -34,6 +34,7 @@ public sealed partial class Rift64ProtocolClient
     private const byte CommandAudio = (byte)'A';
     private const byte CommandTelemetry = (byte)'J';
     private const byte CommandDrawMetatile = (byte)'D';
+    private const byte CommandCopyMemory = (byte)'O';
     private const byte AckByte = (byte)'A';
     private const byte NakByte = (byte)'N';
     private static readonly TimeSpan CommandAckTimeout = TimeSpan.FromMilliseconds(1000);
@@ -247,6 +248,23 @@ public sealed partial class Rift64ProtocolClient
         await SendCommandAsync(CommandCheckedMemory, payload, cancellationToken).ConfigureAwait(false);
         return await WaitForAckAsync(timeout, cancellationToken).ConfigureAwait(false);
     }
+
+    public async Task<bool?> CopyMemoryAsync(ushort sourceAddress, ushort destinationAddress, ushort length, TimeSpan timeout, CancellationToken cancellationToken = default)
+    {
+        var payload = new byte[12];
+        EncodeHexByte((byte)(sourceAddress >> 8), payload.AsSpan(0, 2));
+        EncodeHexByte((byte)(sourceAddress & 0xFF), payload.AsSpan(2, 2));
+        EncodeHexByte((byte)(destinationAddress >> 8), payload.AsSpan(4, 2));
+        EncodeHexByte((byte)(destinationAddress & 0xFF), payload.AsSpan(6, 2));
+        EncodeHexByte((byte)(length >> 8), payload.AsSpan(8, 2));
+        EncodeHexByte((byte)(length & 0xFF), payload.AsSpan(10, 2));
+
+        await SendCommandAsync(CommandCopyMemory, payload, cancellationToken).ConfigureAwait(false);
+        return await WaitForAckAsync(timeout, cancellationToken).ConfigureAwait(false);
+    }
+
+    public Task<bool?> CopyMemoryAsync(ushort sourceAddress, ushort destinationAddress, ushort length, CancellationToken cancellationToken = default) =>
+        CopyMemoryAsync(sourceAddress, destinationAddress, length, DefaultAckTimeout, cancellationToken);
 
     public async Task<bool?> DrawWindowCheckedAsync(byte width, byte height, string text, TimeSpan timeout, CancellationToken cancellationToken = default)
     {
@@ -668,8 +686,14 @@ public sealed partial class Rift64ProtocolClient
     public Task<bool?> SoundBridgeDefineInstrumentAsync(byte id, ushort pulseWidth, byte attackDecay, byte sustainRelease, byte control, TimeSpan timeout, CancellationToken cancellationToken = default) =>
         SendAudioCommandAsync('I', new[] { id, (byte)(pulseWidth & 0xFF), (byte)(pulseWidth >> 8), attackDecay, sustainRelease, control }, timeout, cancellationToken);
 
-    public Task<bool?> SoundBridgePlaySfxAsync(byte sfxId, byte priority, byte flags, TimeSpan timeout, CancellationToken cancellationToken = default) =>
-        SendAudioCommandAsync('S', new[] { sfxId, priority, flags }, timeout, cancellationToken);
+    /// <summary>
+    /// Triggers the SFX bytecode script in slot <paramref name="sfxId"/> on
+    /// <paramref name="voice"/> (0-2; values >= 3 fall back to voice 2). Up
+    /// to three scripts run concurrently, one per voice; an equal-or-higher
+    /// <paramref name="priority"/> replaces a script already on the voice.
+    /// </summary>
+    public Task<bool?> SoundBridgePlaySfxAsync(byte sfxId, byte priority, byte voice, TimeSpan timeout, CancellationToken cancellationToken = default) =>
+        SendAudioCommandAsync('S', new[] { sfxId, priority, voice }, timeout, cancellationToken);
 
     public Task<bool?> SoundBridgeStopSfxAsync(TimeSpan timeout, CancellationToken cancellationToken = default) =>
         SendAudioCommandAsync('X', ReadOnlyMemory<byte>.Empty, timeout, cancellationToken);
@@ -677,10 +701,29 @@ public sealed partial class Rift64ProtocolClient
     public Task<bool?> SoundBridgeStopAllAsync(TimeSpan timeout, CancellationToken cancellationToken = default) =>
         SendAudioCommandAsync('Z', ReadOnlyMemory<byte>.Empty, timeout, cancellationToken);
 
+    /// <summary>
+    /// Programs the SID filter (command <c>AG</c>): 11-bit cutoff (0-2047),
+    /// resonance + voice routing ($D417: high nibble resonance 0-15, low
+    /// nibble bit-per-voice routing, bit 3 external), and the filter mode
+    /// bits (high nibble of $D418: $10 low-pass, $20 band-pass, $40
+    /// high-pass, $80 mutes voice 3). The master volume nibble is preserved.
+    /// </summary>
+    public Task<bool?> SoundBridgeSetFilterAsync(ushort cutoff, byte resonanceRouting, byte mode, TimeSpan timeout, CancellationToken cancellationToken = default) =>
+        SendAudioCommandAsync('G', new[] { (byte)(cutoff & 0x07), (byte)((cutoff >> 3) & 0xFF), resonanceRouting, mode }, timeout, cancellationToken);
+
     // --- SoundBridge Real-Time Stream Commands (no-ACK) ---
 
     public Task SoundBridgeNoteOnAsync(byte voice, ushort sidFrequency, byte instrumentId, CancellationToken cancellationToken = default) =>
         SendAudioStreamCommandAsync('N', new[] { voice, (byte)(sidFrequency & 0xFF), (byte)(sidFrequency >> 8), instrumentId }, cancellationToken);
+
+    /// <summary>
+    /// Note on by note-table index (command <c>AK</c>): index 1-95 = C-0..B-7
+    /// (see <see cref="SidNote.Index"/>). One byte lighter on the wire than
+    /// <c>AN</c>, and the client learns the exact semitone, which keeps
+    /// arpeggios and chord effects in perfect tune.
+    /// </summary>
+    public Task SoundBridgeNoteOnIndexAsync(byte voice, byte noteIndex, byte instrumentId, CancellationToken cancellationToken = default) =>
+        SendAudioStreamCommandAsync('K', new[] { voice, noteIndex, instrumentId }, cancellationToken);
 
     public Task SoundBridgeNoteOffAsync(byte voice, CancellationToken cancellationToken = default) =>
         SendAudioStreamCommandAsync('O', new[] { voice }, cancellationToken);
@@ -713,26 +756,50 @@ public sealed partial class Rift64ProtocolClient
     public Task SoundBridgeSetArpeggioAsync(byte voice, byte holdFrames, bool minor, CancellationToken cancellationToken = default) =>
         SoundBridgeSetEffectAsync(voice, effectType: 4, speed: holdFrames, depth: (byte)(minor ? 1 : 0), cancellationToken);
 
+    /// <summary>
+    /// Arpeggio with explicit semitone offsets: the voice cycles root,
+    /// root + <paramref name="secondSemitones"/>, root + <paramref name="thirdSemitones"/>
+    /// (each 2-15; e.g. 4,7 = major, 3,7 = minor, 5,7 = sus4, 12,12 = octave).
+    /// Tones come from the client's note table, so the chord is in perfect
+    /// equal temperament. The root tracks the last note-on; use
+    /// <see cref="SoundBridgeNoteOnIndexAsync"/> (or tracker rows) so the
+    /// client knows the exact semitone.
+    /// </summary>
+    public Task SoundBridgeSetArpeggioAsync(byte voice, byte holdFrames, byte secondSemitones, byte thirdSemitones, CancellationToken cancellationToken = default)
+    {
+        if (secondSemitones is < 2 or > 15)
+            throw new ArgumentOutOfRangeException(nameof(secondSemitones), "Semitone offsets must be 2-15 (0/1 are reserved for the legacy major/minor encoding).");
+        if (thirdSemitones > 15)
+            throw new ArgumentOutOfRangeException(nameof(thirdSemitones), "Semitone offsets must be 0-15.");
+        return SoundBridgeSetEffectAsync(voice, effectType: 4, speed: holdFrames, depth: (byte)((secondSemitones << 4) | thirdSemitones), cancellationToken);
+    }
+
+    [Obsolete("MiniPlayer2 was replaced by the tracker engine. Use StopSongAsync.")]
     public Task<bool?> StopAudioAsync(TimeSpan timeout, CancellationToken cancellationToken = default) =>
-        SendAudioCommandAsync('0', ReadOnlyMemory<byte>.Empty, timeout, cancellationToken);
+        StopSongAsync(timeout, cancellationToken);
 
+    [Obsolete("MiniPlayer2 was replaced by the tracker engine; A1 now plays the bound song from an orderlist index (0-based), not a subtune. Use PlaySongAsync.")]
     public Task<bool?> StartAudioAsync(byte subtune, TimeSpan timeout, CancellationToken cancellationToken = default) =>
-        SendAudioCommandAsync('1', new[] { subtune }, timeout, cancellationToken);
+        PlaySongAsync(subtune, timeout, cancellationToken);
 
+    [Obsolete("MiniPlayer2 was replaced by the tracker engine. Use PauseSongAsync.")]
     public Task<bool?> PauseAudioAsync(TimeSpan timeout, CancellationToken cancellationToken = default) =>
-        SendAudioCommandAsync('2', ReadOnlyMemory<byte>.Empty, timeout, cancellationToken);
+        PauseSongAsync(timeout, cancellationToken);
 
+    [Obsolete("MiniPlayer2 was replaced by the tracker engine. Use ResumeSongAsync.")]
     public Task<bool?> ResumeAudioAsync(TimeSpan timeout, CancellationToken cancellationToken = default) =>
-        SendAudioCommandAsync('3', ReadOnlyMemory<byte>.Empty, timeout, cancellationToken);
+        ResumeSongAsync(timeout, cancellationToken);
 
+    [Obsolete("MiniPlayer2 was replaced by the tracker engine; A5 now binds a TrackerSong binary. Use BindSongAsync / UploadSongAsync.")]
     public Task<bool?> BindAudioModuleAsync(ushort address, TimeSpan timeout, CancellationToken cancellationToken = default) =>
-        SendAudioCommandAsync('5', new[] { (byte)(address & 0xFF), (byte)(address >> 8) }, timeout, cancellationToken);
+        BindSongAsync(address, timeout, cancellationToken);
 
     public Task<bool?> SetAudioVolumeAsync(byte volume, TimeSpan timeout, CancellationToken cancellationToken = default) =>
         SendAudioCommandAsync('6', new[] { (byte)(volume & 0x0F) }, timeout, cancellationToken);
 
+    [Obsolete("MiniPlayer2 was replaced by the tracker engine; A4 now sets the row tempo in frames per row (1-31). Use SetSongSpeedAsync.")]
     public Task<bool?> SetAudioTempoAsync(byte tempo, TimeSpan timeout, CancellationToken cancellationToken = default) =>
-        SendAudioCommandAsync('4', new[] { tempo }, timeout, cancellationToken);
+        SetSongSpeedAsync(tempo, timeout, cancellationToken);
 
     public async Task<byte?> QueryAudioStateAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
     {
@@ -750,6 +817,10 @@ public sealed partial class Rift64ProtocolClient
             return read > 0 ? buffer[0] : null;
         }
         catch (OperationCanceledException)
+        {
+            return null;
+        }
+        catch (Exception)
         {
             return null;
         }
@@ -979,6 +1050,10 @@ public sealed partial class Rift64ProtocolClient
             return _textConverter.DecodeByte(buffer[0]);
         }
         catch (OperationCanceledException)
+        {
+            return null;
+        }
+        catch (Exception)
         {
             return null;
         }

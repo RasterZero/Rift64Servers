@@ -914,7 +914,7 @@ public static class Program
 
         try
         {
-            await client.StopAudioAsync(cancellationToken).ConfigureAwait(false);
+            await client.StopSongAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

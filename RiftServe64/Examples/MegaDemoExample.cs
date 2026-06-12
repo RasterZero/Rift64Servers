@@ -1,4 +1,4 @@
-using RiftServe64.Sdk.Protocol;
+﻿using RiftServe64.Sdk.Protocol;
 
 public record SpriteTextBlock(ushort Delay, string Line1, string Line2);
 public record SpriteTextBatch(byte[][] Sprites, ushort Delay);
@@ -9,7 +9,7 @@ public record SpriteTextBatch(byte[][] Sprites, ushort Delay);
 /// <para>
 /// It runs the VIC in bank 3 ($C000-$FFFF) so multicolour/hi-res bitmaps live at
 /// $E000 with the colour matrix at $C400 and Color RAM at $D800, while SID music
-/// plays from a module at $7000. Sprite patterns are uploaded to $C800 with
+/// plays from a tracker song at $7000. Sprite patterns are uploaded to $C800 with
 /// pointers at $C7F8, and per-frame motion is sent as batched
 /// <see cref="Rift64SpriteConfig"/> packets. Every memory target sits in the safe
 /// $4000-$FFFF zone (under the KERNAL ROM shadow), never the client program at
@@ -40,7 +40,7 @@ public sealed class MegaDemoExample : IRift64MenuExample
     {
         try
         {
-            await client.StopAudioAsync(CancellationToken.None);
+            await client.StopSongAsync(CancellationToken.None);
             for (byte i = 0; i < 8; i++)
             {
                 await client.SetSpriteAsync(i, 0, 0, Rift64Color.Black, 0, VicBank.Bank3, false, CancellationToken.None);
@@ -78,15 +78,6 @@ public sealed class MegaDemoExample : IRift64MenuExample
         string introPath = Path.Combine(pkgDir, "intro_text.pkg");
         string wizPath = Path.Combine(pkgDir, "Wizard.pkg");
         
-        string? musicPath = ExampleAssets.Find("pkg/mw4title.bin") ?? ExampleAssets.Find("musicmodule.bin");
-        if (musicPath == null)
-        {
-            await client.WriteAtAsync(0, 2, "ERROR: musicmodule.bin NOT FOUND!", Rift64Color.Red, cancellationToken);
-            await client.WriteAtAsync(0, 4, "PRESS ANY KEY TO RETURN.", Rift64Color.Yellow, cancellationToken);
-            await client.PauseForKeyAsync(cancellationToken: cancellationToken);
-            return;
-        }
-
         // Validate files existence
         if (!File.Exists(dsiPath) || !File.Exists(introPath) || !File.Exists(wizPath))
         {
@@ -145,18 +136,16 @@ public sealed class MegaDemoExample : IRift64MenuExample
             cancellationToken);
 
         // ==========================================
-        // STEP 3: START SID MUSIC PLAYBACK
+        // STEP 3: START TRACKER MUSIC PLAYBACK
         // ==========================================
-        var musicBytes = await File.ReadAllBytesAsync(musicPath, cancellationToken);
-        musicBytes = ExampleAssets.StripMiniPlayer2Header(musicBytes);
-        // Stop audio first
-        await client.StopAudioAsync(cancellationToken);
-        // Upload SID module and bind in one call
-        await client.LoadSidModuleAsync(Rift64ProtocolClient.MiniPlayer2ModuleAddress, musicBytes, cancellationToken);
-        // Set Volume to Max (15)
+        // Two-voice tracker song at $7000. No drums here: the demo's bitmap
+        // lives in VIC bank 3 ($C000+), which is the default SFX bank page.
+        await client.StopSongAsync(cancellationToken);
+        await client.SoundBridgeDefineInstrumentAsync(1, pulseWidth: 0x0000, attackDecay: 0x09, sustainRelease: 0x66, control: SidWaveform.Sawtooth | SidWaveform.Gate, cancellationToken);
+        await client.SoundBridgeDefineInstrumentAsync(2, pulseWidth: 0x0600, attackDecay: 0x29, sustainRelease: 0x97, control: SidWaveform.Pulse | SidWaveform.Gate, cancellationToken);
+        await client.UploadSongAsync(Rift64ProtocolClient.TrackerSongAddress, BuildDemoSong(), cancellationToken);
         await client.SetAudioVolumeAsync(15, cancellationToken);
-        // Start Playback of Subtune 1 (A1)
-        await client.StartAudioAsync(1, cancellationToken);
+        await client.PlaySongAsync(0, cancellationToken);
 
         // ==========================================
         // STEP 4: INTRO SPRITE TEXT
@@ -407,7 +396,7 @@ public sealed class MegaDemoExample : IRift64MenuExample
         }
 
         // Cleanup: Stop SID Music
-        await client.StopAudioAsync(cancellationToken);
+        await client.StopSongAsync(cancellationToken);
 
         // Disable all sprites
         for (byte i = 0; i < 8; i++)
@@ -429,6 +418,21 @@ public sealed class MegaDemoExample : IRift64MenuExample
     }
 
     private record CbmpPackage(bool IsMulticolor, byte Bg, byte Border, byte[] Bitmap, byte[] Screen, byte[] Color);
+
+    // The demo soundtrack: a looping two-voice piece (saw bass, pulse lead).
+    private static TrackerSong BuildDemoSong()
+    {
+        var song = new TrackerSong(rowsPerPattern: 32) { Speed = 6, LoopOrder = 0 };
+        var p = song.AddPattern();
+
+        p.SetNote(0, 0, "A-2", 1).SetNote(4, 0, "A-2", 1).SetNote(8, 0, "F-2", 1).SetNote(12, 0, "F-2", 1)
+         .SetNote(16, 0, "C-2", 1).SetNote(20, 0, "C-2", 1).SetNote(24, 0, "G-2", 1).SetNote(28, 0, "G-2", 1);
+        p.SetNote(0, 1, "A-4", 2).SetNote(6, 1, "E-4", 2).SetNote(8, 1, "F-4", 2).SetNote(14, 1, "C-5", 2)
+         .SetNote(16, 1, "E-4", 2).SetNote(22, 1, "G-4", 2).SetNote(24, 1, "B-4", 2).SetNote(30, 1, "D-5", 2);
+
+        song.Order.Add(0);
+        return song;
+    }
 
     private static CbmpPackage ParseCbmp(byte[] data)
     {

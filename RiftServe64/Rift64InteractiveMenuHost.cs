@@ -27,7 +27,10 @@ public sealed class Rift64InteractiveMenuHost
             ['F'] = new TetrisGameExample(),
             ['G'] = new SoundBridgeDemoExample(),
             ['H'] = new SoundBridgeMusicExample(),
-            ['I'] = new SoundBridgeFxShowcaseExample()
+            ['I'] = new SoundBridgeFxShowcaseExample(),
+            ['J'] = new MemoryCopyExample(),
+            ['K'] = new RemoteTrackerExample(),
+            ['L'] = new DrumKitExample()
         };
     }
 
@@ -94,7 +97,7 @@ public sealed class Rift64InteractiveMenuHost
             await _client.WriteAtAsync(x, y, $"{example.Key}) {example.MenuLabel}", Rift64Color.Cyan, cancellationToken);
         }
 
-        await _client.WriteAtAsync(0, 22, "Press 1-9, A-I to run, Q to exit.", Rift64Color.Yellow, cancellationToken);
+        await _client.WriteAtAsync(0, 22, "Press 1-9, A-J to run, Q to exit.", Rift64Color.Yellow, cancellationToken);
     }
 
     private async Task RunSelectedExampleAsync(char key, Rift64ClientIdentity identity, CancellationToken cancellationToken)

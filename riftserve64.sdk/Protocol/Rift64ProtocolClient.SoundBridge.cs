@@ -29,10 +29,17 @@ public sealed partial class Rift64ProtocolClient
     public Task<bool?> SoundBridgeDefineInstrumentAsync(byte id, ushort pulseWidth, byte attackDecay, byte sustainRelease, SidWaveform control, CancellationToken cancellationToken = default) =>
         SoundBridgeDefineInstrumentAsync(id, pulseWidth, attackDecay, sustainRelease, (byte)control, cancellationToken);
 
-    // --- Note on/off (AN/AO) --------------------------------------------
+    // --- Note on/off (AN/AK/AO) -----------------------------------------
 
     public Task SoundBridgeNoteOnAsync(SoundBridgeVoice voice, ushort sidFrequency, byte instrumentId, CancellationToken cancellationToken = default) =>
         SoundBridgeNoteOnAsync((byte)voice, sidFrequency, instrumentId, cancellationToken);
+
+    public Task SoundBridgeNoteOnIndexAsync(SoundBridgeVoice voice, byte noteIndex, byte instrumentId, CancellationToken cancellationToken = default) =>
+        SoundBridgeNoteOnIndexAsync((byte)voice, noteIndex, instrumentId, cancellationToken);
+
+    /// <summary>Note on by name, e.g. <c>"C-4"</c> or <c>"A#3"</c> (octaves 0-7).</summary>
+    public Task SoundBridgeNoteOnAsync(SoundBridgeVoice voice, string note, byte instrumentId, CancellationToken cancellationToken = default) =>
+        SoundBridgeNoteOnIndexAsync((byte)voice, SidNote.Index(note), instrumentId, cancellationToken);
 
     public Task SoundBridgeNoteOffAsync(SoundBridgeVoice voice, CancellationToken cancellationToken = default) =>
         SoundBridgeNoteOffAsync((byte)voice, cancellationToken);

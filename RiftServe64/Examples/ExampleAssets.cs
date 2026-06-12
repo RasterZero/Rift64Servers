@@ -47,20 +47,4 @@ public static class ExampleAssets
         }
         return null;
     }
-
-    /// <summary>
-    /// MiniPlayer2 modules are assembled with a 2-byte little-endian load
-    /// address prefix (typically <c>$7000</c>). Strip exactly that header
-    /// when present.
-    /// </summary>
-    public static byte[] StripMiniPlayer2Header(byte[] moduleBytes)
-    {
-        if (moduleBytes.Length < 2) return moduleBytes;
-        // Load address $7000 → bytes 0x00, 0x70
-        if (moduleBytes[0] == 0x00 && moduleBytes[1] == 0x70)
-        {
-            return moduleBytes[2..];
-        }
-        return moduleBytes;
-    }
 }

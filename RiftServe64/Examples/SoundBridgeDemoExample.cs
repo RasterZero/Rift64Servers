@@ -8,10 +8,9 @@ using RiftServe64.Sdk.Protocol;
 /// ADSR envelope and pulse width. SoundBridge exposes them through high-level
 /// commands: define instruments (<c>AD</c>), trigger Note On per voice, arm
 /// per-voice effects (<c>AE</c>: vibrato/slide/PWM), and fire pre-uploaded SFX
-/// scripts. This example also contrasts the two playback modes —
-/// SOUNDBRIDGE_ONLY (all three voices keyboard-mapped) versus
-/// MIXED_PLAYER_PLUS_SFX (a tracker owns V1/V2 while V3 stays free for SFX).
-/// SFX scripts are uploaded to the safe $C000 region.
+/// scripts. The engine runs everything at once: toggling background music
+/// starts a client-side tracker song on voices 1-2 while voice 3 keeps
+/// answering keyboard SFX triggers. SFX scripts are uploaded to $C000.
 /// </para>
 /// </summary>
 public sealed class SoundBridgeDemoExample : IRift64MenuExample
@@ -132,45 +131,13 @@ public sealed class SoundBridgeDemoExample : IRift64MenuExample
         };
         await client.StoreMemoryCheckedAsync(0xC080, coinScript, cancellationToken);
 
-        // 5. Pre-load background music module for Mixed Mode demo
-        var foundPath =
-            ExampleAssets.Find("pkg/mw4title.bin") ??
-            ExampleAssets.Find("musicmodule.bin") ??
-            ExampleAssets.Find("tools/data/mw4title.bin");
+        // 5. Build and upload a small background tune for the tracker. The song
+        // only uses voices 1-2, leaving voice 3 free for keyboard SFX.
+        await client.WriteAtAsync(0, 6, "5. UPLOADING BACKGROUND SONG...", Rift64Color.White, cancellationToken);
+        bool hasMusic = await client.UploadSongAsync(
+            Rift64ProtocolClient.TrackerSongAddress, BuildBackgroundSong(), cancellationToken);
 
-        bool hasMusic = false;
-        if (foundPath != null)
-        {
-            await client.WriteAtAsync(0, 6, "5. PRELOADING BACKGROUND MUSIC...", Rift64Color.White, cancellationToken);
-            var moduleBytes = await File.ReadAllBytesAsync(foundPath, cancellationToken);
-            moduleBytes = ExampleAssets.StripMiniPlayer2Header(moduleBytes);
-            
-            int offset = 0;
-            bool uploadSuccess = true;
-            while (offset < moduleBytes.Length)
-            {
-                int chunkSize = Math.Min(256, moduleBytes.Length - offset);
-                var chunk = moduleBytes.AsMemory(offset, chunkSize);
-                
-                var chunkAck = await client.StoreMemoryCheckedAsync((ushort)(Rift64ProtocolClient.MiniPlayer2ModuleAddress + offset), chunk, cancellationToken);
-                if (chunkAck != true)
-                {
-                    uploadSuccess = false;
-                    break;
-                }
-                offset += chunkSize;
-            }
-
-            if (uploadSuccess)
-            {
-                await client.BindAudioModuleAsync(Rift64ProtocolClient.MiniPlayer2ModuleAddress, cancellationToken);
-                hasMusic = true;
-            }
-        }
-
-        // Set to SOUNDBRIDGE_ONLY mode initially (AM01)
-        await client.SoundBridgeSetModeAsync(SoundBridgeAudioMode.SoundBridgeOnly, cancellationToken);
-        byte currentMode = 1; // 1 = SoundBridge Only, 2 = Mixed Mode
+        byte currentMode = 1; // 1 = keyboard on all voices, 2 = tracker music on V1/V2
 
         // Phase 3.1: the synthesizer UI is almost entirely static. Draw it once
         // up-front and only repaint when the audio mode actually toggles, instead
@@ -246,19 +213,19 @@ public sealed class SoundBridgeDemoExample : IRift64MenuExample
             else if (key is 'z' or 'Z')
             {
                 await client.WriteAtAsync(0, 22, "TRIGGERING LASER SFX (SLOT 0) ON V3...        ", Rift64Color.LightGreen, cancellationToken);
-                await client.SoundBridgePlaySfxAsync(sfxId: 0, priority: 3, flags: 0, cancellationToken);
+                await client.SoundBridgePlaySfxAsync(sfxId: 0, priority: 3, voice: 2, cancellationToken);
             }
             // X: Explosion SFX (ID 1, Priority 4)
             else if (key is 'x' or 'X')
             {
                 await client.WriteAtAsync(0, 22, "TRIGGERING EXPLOSION SFX (SLOT 1) ON V3...    ", Rift64Color.LightGreen, cancellationToken);
-                await client.SoundBridgePlaySfxAsync(sfxId: 1, priority: 4, flags: 0, cancellationToken);
+                await client.SoundBridgePlaySfxAsync(sfxId: 1, priority: 4, voice: 2, cancellationToken);
             }
             // C: Coin SFX (ID 2, Priority 5)
             else if (key is 'c' or 'C')
             {
                 await client.WriteAtAsync(0, 22, "TRIGGERING COIN SFX (SLOT 2) ON V3...         ", Rift64Color.LightGreen, cancellationToken);
-                await client.SoundBridgePlaySfxAsync(sfxId: 2, priority: 5, flags: 0, cancellationToken);
+                await client.SoundBridgePlaySfxAsync(sfxId: 2, priority: 5, voice: 2, cancellationToken);
             }
             // B: Stop/silence all sounds (AZ)
             else if (key is 'b' or 'B')
@@ -266,26 +233,23 @@ public sealed class SoundBridgeDemoExample : IRift64MenuExample
                 await client.WriteAtAsync(0, 22, "SILENCING ALL AUDIO (AZ)...                   ", Rift64Color.White, cancellationToken);
                 await client.SoundBridgeStopAllAsync(cancellationToken);
             }
-            // M: Toggle Mode
+            // M: Toggle background tracker music
             else if (key is 'm' or 'M')
             {
                 if (hasMusic)
                 {
                     if (currentMode == 1)
                     {
-                        // Transition to MIXED mode (mode 2)
-                        await client.WriteAtAsync(0, 22, "SWITCHING TO MIXED MODE (AM02)...             ", Rift64Color.White, cancellationToken);
+                        await client.WriteAtAsync(0, 22, "STARTING TRACKER MUSIC (A1)...                ", Rift64Color.White, cancellationToken);
                         await client.SoundBridgeStopAllAsync(cancellationToken);
-                        await client.SoundBridgeSetModeAsync(SoundBridgeAudioMode.MixedPlayerPlusSfx, cancellationToken);
-                        await client.StartAudioAsync(1, cancellationToken);
+                        await client.PlaySongAsync(0, cancellationToken);
                         currentMode = 2;
                         await DrawSynthUiAsync(client, currentMode, cancellationToken);
                     }
                     else
                     {
-                        // Transition to SOUNDBRIDGE_ONLY mode (mode 1)
-                        await client.WriteAtAsync(0, 22, "SWITCHING TO SOUNDBRIDGE ONLY (AM01)...       ", Rift64Color.White, cancellationToken);
-                        await client.SoundBridgeSetModeAsync(SoundBridgeAudioMode.SoundBridgeOnly, cancellationToken);
+                        await client.WriteAtAsync(0, 22, "STOPPING TRACKER MUSIC (A0)...                ", Rift64Color.White, cancellationToken);
+                        await client.StopSongAsync(cancellationToken);
                         currentMode = 1;
                         await DrawSynthUiAsync(client, currentMode, cancellationToken);
                     }
@@ -307,13 +271,13 @@ public sealed class SoundBridgeDemoExample : IRift64MenuExample
 
         if (currentMode == 1)
         {
-            await client.WriteAtAsync(0, 2, "MODE: SOUNDBRIDGE_ONLY (AM01)          ", Rift64Color.Yellow, cancellationToken);
+            await client.WriteAtAsync(0, 2, "MUSIC: OFF                             ", Rift64Color.Yellow, cancellationToken);
             await client.WriteAtAsync(0, 3, "SID Voice 1, 2 and 3 are mapped to keys.", Rift64Color.White, cancellationToken);
         }
         else
         {
-            await client.WriteAtAsync(0, 2, "MODE: MIXED_PLAYER_PLUS_SFX (AM02)     ", Rift64Color.LightBlue, cancellationToken);
-            await client.WriteAtAsync(0, 3, "Music plays on V1 & V2. SFX owns V3.", Rift64Color.White, cancellationToken);
+            await client.WriteAtAsync(0, 2, "MUSIC: TRACKER SONG PLAYING            ", Rift64Color.LightBlue, cancellationToken);
+            await client.WriteAtAsync(0, 3, "Song plays on V1 & V2. SFX still on V3.", Rift64Color.White, cancellationToken);
         }
 
         await client.WriteAtAsync(0, 5, "KEYBOARD SYNTHESIZER:", Rift64Color.Cyan, cancellationToken);
@@ -326,18 +290,33 @@ public sealed class SoundBridgeDemoExample : IRift64MenuExample
         }
         else
         {
-            await client.WriteAtAsync(0, 7, "[Tracker player owns Voice 1 and 2]      ", Rift64Color.MediumGray, cancellationToken);
+            await client.WriteAtAsync(0, 7, "[Tracker song owns Voice 1 and 2]       ", Rift64Color.MediumGray, cancellationToken);
             await client.WriteAtAsync(0, 8, "[V1 & V2 keyboard synthesis disabled]  ", Rift64Color.MediumGray, cancellationToken);
-            await client.WriteAtAsync(0, 9, "[V3 available strictly for SFX]         ", Rift64Color.MediumGray, cancellationToken);
+            await client.WriteAtAsync(0, 9, "[V3 keeps answering SFX triggers]       ", Rift64Color.MediumGray, cancellationToken);
         }
 
         await client.WriteAtAsync(0, 11, "SOUND EFFECTS & ACTIONS:", Rift64Color.Cyan, cancellationToken);
         await client.WriteAtAsync(0, 13, "Z) Play Laser SFX      X) Play Explosion SFX", Rift64Color.White, cancellationToken);
-        await client.WriteAtAsync(0, 14, "C) Play Coin Chirp     M) Toggle Audio Mode", Rift64Color.White, cancellationToken);
+        await client.WriteAtAsync(0, 14, "C) Play Coin Chirp     M) Toggle Music", Rift64Color.White, cancellationToken);
         await client.WriteAtAsync(0, 15, "B) Stop All Sounds", Rift64Color.White, cancellationToken);
         await client.WriteAtAsync(0, 16, "F1) Enable V3 Vibrato  F3) Enable V3 Slide", Rift64Color.White, cancellationToken);
         await client.WriteAtAsync(0, 17, "F5) Enable V3 PWM      F7) Clear V3 Effects", Rift64Color.White, cancellationToken);
         await client.WriteAtAsync(0, 19, "Space) Return to Menu", Rift64Color.White, cancellationToken);
+    }
+
+    // A 16-row two-voice loop (saw bass on V1, triangle arps on V2) reusing
+    // the instruments defined at startup. Voice 3 stays free for SFX.
+    private static TrackerSong BuildBackgroundSong()
+    {
+        var song = new TrackerSong(rowsPerPattern: 16) { Speed = 6 };
+        var p = song.AddPattern();
+
+        p.SetNote(0, 0, "C-2", 1).SetNote(4, 0, "G-2", 1).SetNote(8, 0, "A-2", 1).SetNote(12, 0, "F-2", 1);
+        p.SetNote(0, 1, "C-4", 2).SetNote(2, 1, "E-4", 2).SetNote(4, 1, "G-4", 2).SetNote(6, 1, "E-4", 2);
+        p.SetNote(8, 1, "A-4", 2).SetNote(10, 1, "C-5", 2).SetNote(12, 1, "F-4", 2).SetNote(14, 1, "A-4", 2);
+
+        song.Order.Add(0);
+        return song;
     }
 
     private static int MapQToPIndex(char k)

@@ -53,13 +53,21 @@ The RiftServe64 codebase contains an extensive set of developer examples inside 
 
 ### Audio and SID Synthesizer
 
-- **SID Music (`AudioPlayerExample.cs`)**
-  - **Concept:** Demonstrates remote streaming of page-aligned SID music tracker files and controlling the client-side MiniPlayer2 audio engine.
-  - **Key Mechanics:** Streams music modules in 256-byte checksum-verified chunks to the client's safe module RAM ($7000), binds the player, and controls volume, subtunes, play, and stop states using high-level audio commands (`A`).
+- **Tracker Music (`AudioPlayerExample.cs`)**
+  - **Concept:** Demonstrates the client-side tracker: a song with bass, lead and drums is composed in C# (`TrackerSong`), compiled, uploaded once and sequenced entirely on the C64.
+  - **Key Mechanics:** Builds patterns/orderlist with the song compiler, uploads the binary in checksum-verified chunks to $7000, binds (`A5`) and plays (`A1`). Drums are SFX bytecode scripts triggered from tracker rows; an instrument auto-effect (`AC`) carries vibrato on the lead. The host polls live position via the status query (`AY`).
+
+- **Remote Tracker (`RemoteTrackerExample.cs`)**
+  - **Concept:** The same row decoder fed live over the wire: the host streams pattern rows into a 32-row client ring buffer instead of uploading a song.
+  - **Key Mechanics:** Enters remote mode (`AT`), streams row batches (`AU`, fire-and-forget) and paces itself with the status query (`AY`) to keep ~24 rows buffered. A deliberate stall shows the underrun-hold policy: sustaining voices keep ringing and the underrun counter ticks up.
+
+- **SID Drum Kit (`DrumKitExample.cs`)**
+  - **Concept:** Classic SID percussion (kick/snare/hats/tom) as SFX bytecode scripts, playable on any of the three voices — up to three drums sounding at once.
+  - **Key Mechanics:** Uploads a `SidDrumKit` to the $C000 SFX bank (`AB`) and triggers slots with the play-SFX command (`AS`), whose third argument selects the target voice.
 
 - **SndBridge Synth (`SoundBridgeDemoExample.cs`)**
   - **Concept:** An interactive, real-time SID synthesizer that turns the client's keyboard into a three-voice instrument.
-  - **Key Mechanics:** Uses SoundBridge commands to define instrument ADSR parameters (`AD`), trigger Note On per voice, apply pitch/vibrato/PWM modulation effects (`AE`), and fire pre-uploaded sound effect scripts placed in the `$C000` memory region.
+  - **Key Mechanics:** Uses SoundBridge commands to define instrument ADSR parameters (`AD`), trigger Note On per voice, apply pitch/vibrato/PWM modulation effects (`AE`), and fire pre-uploaded sound effect scripts placed in the `$C000` memory region. Toggling music starts a client-side tracker song on voices 1-2 while voice 3 keeps answering SFX triggers.
 
 ### Hardware Telemetry
 

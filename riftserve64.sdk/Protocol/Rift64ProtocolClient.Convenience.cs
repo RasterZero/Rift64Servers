@@ -8,9 +8,17 @@ public sealed partial class Rift64ProtocolClient
 {
     /// <summary>
     /// Conventional load address for a MiniPlayer2 SID module on the C64.
-    /// The MiniPlayer2 build assembles to this address; uploads must match.
     /// </summary>
+    [Obsolete("MiniPlayer2 was removed from the client. Use TrackerSongAddress for tracker songs.")]
     public const ushort MiniPlayer2ModuleAddress = 0x7000;
+
+    /// <summary>
+    /// Conventional upload address for a compiled <see cref="TrackerSong"/>.
+    /// Any address in the $4000-$CFFF upload zone works; this is just a
+    /// convention that keeps songs clear of bitmaps/charsets at $4000+ and
+    /// the SFX bank at $C000.
+    /// </summary>
+    public const ushort TrackerSongAddress = 0x7000;
 
     /// <summary>PETSCII screen code for the half-checkerboard glyph (0x66).</summary>
     public const char PetsciiCheckerboard = (char)0x66;
@@ -69,20 +77,25 @@ public sealed partial class Rift64ProtocolClient
         CancellationToken cancellationToken = default) =>
         SetRasterSplitAsync(enable, splitLine, topD011, topD016, topD018, botD011, botD016, botD018, DefaultAckTimeout, cancellationToken);
 
+    [Obsolete("MiniPlayer2 was replaced by the tracker engine. Use StopSongAsync.")]
     public Task<bool?> StopAudioAsync(CancellationToken cancellationToken = default) =>
-        StopAudioAsync(DefaultAckTimeout, cancellationToken);
+        StopSongAsync(DefaultAckTimeout, cancellationToken);
 
+    [Obsolete("MiniPlayer2 was replaced by the tracker engine; A1 now plays the bound song from an orderlist index (0-based), not a subtune. Use PlaySongAsync.")]
     public Task<bool?> StartAudioAsync(byte subtune, CancellationToken cancellationToken = default) =>
-        StartAudioAsync(subtune, DefaultAckTimeout, cancellationToken);
+        PlaySongAsync(subtune, DefaultAckTimeout, cancellationToken);
 
+    [Obsolete("MiniPlayer2 was replaced by the tracker engine. Use PauseSongAsync.")]
     public Task<bool?> PauseAudioAsync(CancellationToken cancellationToken = default) =>
-        PauseAudioAsync(DefaultAckTimeout, cancellationToken);
+        PauseSongAsync(DefaultAckTimeout, cancellationToken);
 
+    [Obsolete("MiniPlayer2 was replaced by the tracker engine. Use ResumeSongAsync.")]
     public Task<bool?> ResumeAudioAsync(CancellationToken cancellationToken = default) =>
-        ResumeAudioAsync(DefaultAckTimeout, cancellationToken);
+        ResumeSongAsync(DefaultAckTimeout, cancellationToken);
 
+    [Obsolete("MiniPlayer2 was replaced by the tracker engine; A5 now binds a TrackerSong binary. Use BindSongAsync / UploadSongAsync.")]
     public Task<bool?> BindAudioModuleAsync(ushort address, CancellationToken cancellationToken = default) =>
-        BindAudioModuleAsync(address, DefaultAckTimeout, cancellationToken);
+        BindSongAsync(address, DefaultAckTimeout, cancellationToken);
 
     public Task<bool?> SetAudioVolumeAsync(byte volume, CancellationToken cancellationToken = default) =>
         SetAudioVolumeAsync(volume, DefaultAckTimeout, cancellationToken);
@@ -106,14 +119,19 @@ public sealed partial class Rift64ProtocolClient
     public Task<bool?> SoundBridgeDefineInstrumentAsync(byte id, ushort pulseWidth, byte attackDecay, byte sustainRelease, byte control, CancellationToken cancellationToken = default) =>
         SoundBridgeDefineInstrumentAsync(id, pulseWidth, attackDecay, sustainRelease, control, DefaultAckTimeout, cancellationToken);
 
-    public Task<bool?> SoundBridgePlaySfxAsync(byte sfxId, byte priority, byte flags, CancellationToken cancellationToken = default) =>
-        SoundBridgePlaySfxAsync(sfxId, priority, flags, DefaultAckTimeout, cancellationToken);
+    /// <inheritdoc cref="SoundBridgePlaySfxAsync(byte,byte,byte,TimeSpan,CancellationToken)"/>
+    public Task<bool?> SoundBridgePlaySfxAsync(byte sfxId, byte priority, byte voice, CancellationToken cancellationToken = default) =>
+        SoundBridgePlaySfxAsync(sfxId, priority, voice, DefaultAckTimeout, cancellationToken);
 
     public Task<bool?> SoundBridgeStopSfxAsync(CancellationToken cancellationToken = default) =>
         SoundBridgeStopSfxAsync(DefaultAckTimeout, cancellationToken);
 
     public Task<bool?> SoundBridgeStopAllAsync(CancellationToken cancellationToken = default) =>
         SoundBridgeStopAllAsync(DefaultAckTimeout, cancellationToken);
+
+    /// <inheritdoc cref="SoundBridgeSetFilterAsync(ushort,byte,byte,TimeSpan,CancellationToken)"/>
+    public Task<bool?> SoundBridgeSetFilterAsync(ushort cutoff, byte resonanceRouting, byte mode, CancellationToken cancellationToken = default) =>
+        SoundBridgeSetFilterAsync(cutoff, resonanceRouting, mode, DefaultAckTimeout, cancellationToken);
 
     public Task<char?> ReadKeyAsync(CancellationToken cancellationToken = default) =>
         ReadKeyAsync(DefaultAckTimeout, cancellationToken);
@@ -166,6 +184,7 @@ public sealed partial class Rift64ProtocolClient
     /// destination must be page-aligned (low byte = 0).
     /// </summary>
     /// <returns>True if every upload chunk and the bind ACK succeeded.</returns>
+    [Obsolete("MiniPlayer2 was removed from the client; the bound data must now be a compiled TrackerSong. Use UploadSongAsync.")]
     public async Task<bool> LoadSidModuleAsync(
         ushort address,
         ReadOnlyMemory<byte> moduleBytes,
